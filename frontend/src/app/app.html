@@ -1,0 +1,288 @@
+<main class="page-shell">
+  <section class="hero">
+    <div class="hero-copy">
+      <p class="eyebrow">Projeto tecnico Korp</p>
+      <h1>Sistema de emissao de notas fiscais com microsservicos</h1>
+      <p class="hero-text">
+        Cadastro de produtos, abertura de notas, impressao com baixa de estoque, persistencia fisica em SQLite
+        e simulacao controlada de falha entre servico de faturamento e servico de estoque.
+      </p>
+    </div>
+
+    <div class="summary-grid">
+      <article class="summary-card">
+        <span class="summary-label">Produtos</span>
+        <strong>{{ products.length }}</strong>
+        <small>Itens disponiveis no estoque</small>
+      </article>
+
+      <article class="summary-card">
+        <span class="summary-label">Notas abertas</span>
+        <strong>{{ openInvoicesCount }}</strong>
+        <small>Prontas para impressao</small>
+      </article>
+
+      <article class="summary-card">
+        <span class="summary-label">Notas fechadas</span>
+        <strong>{{ closedInvoicesCount }}</strong>
+        <small>Impressao concluida</small>
+      </article>
+
+      <article class="summary-card">
+        <span class="summary-label">Saldo critico</span>
+        <strong>{{ lowStockProductsCount }}</strong>
+        <small>Produtos com saldo ate 3</small>
+      </article>
+    </div>
+  </section>
+
+  @if (feedback; as currentFeedback) {
+    <section
+      class="feedback-toast"
+      [class.feedback-toast--error]="currentFeedback.tone === 'error'"
+      [class.feedback-toast--info]="currentFeedback.tone === 'info'"
+    >
+      <div>
+        <strong>{{ currentFeedback.title }}</strong>
+        <p>{{ currentFeedback.message }}</p>
+      </div>
+      <button type="button" class="link-button" (click)="dismissFeedback()">Fechar</button>
+    </section>
+  }
+
+  <section class="architecture-strip">
+    <article class="architecture-card">
+      <h2>Microsservico de Estoque</h2>
+      <p>Responsavel por produtos, saldos e baixa idempotente durante a impressao.</p>
+    </article>
+
+    <article class="architecture-card">
+      <h2>Microsservico de Faturamento</h2>
+      <p>Responsavel por numeracao sequencial, status Aberta ou Fechada e orquestracao da impressao.</p>
+    </article>
+
+    <article class="architecture-card">
+      <h2>Falha recuperavel</h2>
+      <p>Ative a simulacao abaixo para retornar erro do estoque e validar o feedback ao usuario.</p>
+    </article>
+  </section>
+
+  <section class="content-grid">
+    <article class="panel panel--primary">
+      <div class="panel-heading">
+        <div>
+          <p class="eyebrow">Estoque</p>
+          <h2>Cadastrar produto</h2>
+        </div>
+      </div>
+
+      <form class="form-grid" [formGroup]="productForm" (ngSubmit)="submitProduct()">
+        <label>
+          <span>Codigo</span>
+          <input type="text" formControlName="code" placeholder="PRD-001" />
+        </label>
+
+        <label>
+          <span>Descricao</span>
+          <input type="text" formControlName="description" placeholder="Monitor 27 polegadas" />
+        </label>
+
+        <label>
+          <span>Saldo inicial</span>
+          <input type="number" formControlName="balance" min="0" />
+        </label>
+
+        <button type="submit" class="primary-button" [disabled]="submittingProduct">
+          {{ submittingProduct ? 'Salvando...' : 'Cadastrar produto' }}
+        </button>
+      </form>
+    </article>
+
+    <article class="panel panel--resilience" [class.panel--resilience-active]="failureMode?.enabled">
+      <div class="panel-heading">
+        <div>
+          <p class="eyebrow">Resiliencia</p>
+          <h2>Simular falha do estoque</h2>
+        </div>
+        <span class="status-pill" [class.status-pill--active]="failureMode?.enabled">
+          {{ failureMode?.enabled ? 'Falha ativa' : 'Servico normal' }}
+        </span>
+      </div>
+
+      @if (failureMode?.enabled) {
+        <div class="resilience-callout">
+          <strong>Simulacao 503 ativa</strong>
+          <span>O estoque vai falhar de proposito, a nota continuara aberta e o usuario recebera feedback.</span>
+        </div>
+      }
+
+      <form class="form-grid" [formGroup]="failureForm" (ngSubmit)="saveFailureMode()">
+        <label class="checkbox-row">
+          <input type="checkbox" formControlName="enabled" />
+          <span>Responder com erro 503 no servico de estoque</span>
+        </label>
+
+        <label>
+          <span>Mensagem retornada ao usuario</span>
+          <textarea rows="4" formControlName="message"></textarea>
+        </label>
+
+        <button type="submit" class="secondary-button" [disabled]="savingFailureMode">
+          {{ savingFailureMode ? 'Atualizando...' : 'Salvar simulacao' }}
+        </button>
+      </form>
+    </article>
+  </section>
+
+  <section class="content-grid">
+    <article class="panel panel--wide">
+      <div class="panel-heading">
+        <div>
+          <p class="eyebrow">Faturamento</p>
+          <h2>Criar nota fiscal</h2>
+        </div>
+      </div>
+
+      <form [formGroup]="invoiceForm" (ngSubmit)="submitInvoice()">
+        <div class="invoice-items" formArrayName="items">
+          @for (itemControl of invoiceItems.controls; track $index; let index = $index) {
+            <div class="invoice-item-row" [formGroupName]="index">
+              <label>
+                <span>Produto</span>
+                <select formControlName="productId">
+                  <option value="">Selecione um produto</option>
+                  @for (product of products; track product.id) {
+                    <option [value]="product.id">
+                      {{ product.code }} - {{ formatProductDescription(product.description) }} (saldo {{ product.balance }})
+                    </option>
+                  }
+                </select>
+              </label>
+
+              <label>
+                <span>Quantidade</span>
+                <input type="number" formControlName="quantity" min="1" />
+              </label>
+
+              <button type="button" class="ghost-button" (click)="removeInvoiceItem(index)" [disabled]="invoiceItems.length === 1">
+                Remover
+              </button>
+            </div>
+          }
+        </div>
+
+        <div class="inline-actions">
+          <button type="button" class="ghost-button" (click)="addInvoiceItem()">Adicionar item</button>
+          <button type="submit" class="primary-button" [disabled]="submittingInvoice || products.length === 0">
+            {{ submittingInvoice ? 'Criando nota...' : 'Abrir nota fiscal' }}
+          </button>
+        </div>
+      </form>
+    </article>
+  </section>
+
+  <section class="content-grid">
+    <article class="panel panel--wide">
+      <div class="panel-heading">
+        <div>
+          <p class="eyebrow">Consulta</p>
+          <h2>Produtos cadastrados</h2>
+        </div>
+      </div>
+
+      @if (products.length === 0) {
+        <p class="empty-state">Nenhum produto cadastrado ainda.</p>
+      } @else {
+        <div class="table-shell">
+          <table>
+            <thead>
+              <tr>
+                <th>Codigo</th>
+                <th>Descricao</th>
+                <th>Saldo</th>
+                <th>Atualizado</th>
+              </tr>
+            </thead>
+            <tbody>
+              @for (product of products; track trackById($index, product)) {
+                <tr>
+                  <td>{{ product.code }}</td>
+                  <td>{{ formatProductDescription(product.description) }}</td>
+                  <td>{{ product.balance }}</td>
+                  <td>{{ product.updatedAtUtc | date: 'dd/MM/yyyy HH:mm' }}</td>
+                </tr>
+              }
+            </tbody>
+          </table>
+        </div>
+      }
+    </article>
+
+    <article class="panel panel--wide">
+      <div class="panel-heading">
+        <div>
+          <p class="eyebrow">Consulta</p>
+          <h2>Notas fiscais</h2>
+        </div>
+      </div>
+
+      @if (dashboardLoading) {
+        <div class="loading-panel">
+          <span class="spinner"></span>
+          <p>Carregando dados do sistema...</p>
+        </div>
+      } @else if (invoices.length === 0) {
+        <p class="empty-state">Nenhuma nota fiscal criada ainda.</p>
+      } @else {
+        <div class="invoice-card-list">
+          @for (invoice of invoices; track trackById($index, invoice)) {
+            <article class="invoice-card" [class.invoice-card--open]="invoice.status === 'Aberta'">
+              <div class="invoice-card__top">
+                <div>
+                  <span class="invoice-number">NF {{ formatInvoiceNumber(invoice.number) }}</span>
+                  <h3 [class.invoice-status--open]="invoice.status === 'Aberta'" [class.invoice-status--closed]="invoice.status === 'Fechada'">
+                    {{ invoice.status }}
+                  </h3>
+                </div>
+
+                @if (invoice.status === 'Aberta') {
+                  <button
+                    type="button"
+                    class="primary-button"
+                    [disabled]="printingInvoiceId === invoice.id"
+                    (click)="printInvoice(invoice)"
+                  >
+                    {{ printingInvoiceId === invoice.id ? 'Processando...' : 'Imprimir e fechar nota' }}
+                  </button>
+                } @else {
+                  <span class="closed-state">Impressao finalizada</span>
+                }
+              </div>
+
+              <ul class="invoice-items-list">
+                @for (item of invoice.items; track trackById($index, item)) {
+                  <li>
+                    <strong>{{ item.productCode }}</strong>
+                    <span>{{ formatProductDescription(item.productDescription) }}</span>
+                    <span>Qtd. {{ item.quantity }}</span>
+                  </li>
+                }
+              </ul>
+
+              <div class="invoice-meta">
+                <span>Criada em {{ invoice.createdAtUtc | date: 'dd/MM/yyyy HH:mm' }}</span>
+                @if (invoice.closedAtUtc) {
+                  <span>Fechada em {{ invoice.closedAtUtc | date: 'dd/MM/yyyy HH:mm' }}</span>
+                }
+              </div>
+
+              @if (invoice.lastError) {
+                <p class="invoice-error">{{ invoice.lastError }}</p>
+              }
+            </article>
+          }
+        </div>
+      }
+    </article>
+  </section>
+</main>

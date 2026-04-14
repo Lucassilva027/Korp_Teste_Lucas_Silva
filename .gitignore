@@ -1,0 +1,8 @@
+**/bin/
+**/obj/
+**/node_modules/
+**/dist/
+temp-build/
+*.db
+*.db-shm
+*.db-wal
